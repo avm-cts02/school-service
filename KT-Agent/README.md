@@ -28,11 +28,17 @@ Workflow creates a GitHub Issue → assigns to KT_REVIEWER
          │
          ▼
 Reviewer gets GitHub email notification ✅
+         │
+         ▼
+Reviewer ticks all checklist boxes → closes issue
+         │
+         ▼
+kt-review-closed workflow triggers → notifies KT doc creator ✅
 ```
 
-The agent script and the reviewer notification are **cleanly separated**:
+The agent script and the notifications are **cleanly separated**:
 - The **script** only generates + commits
-- **GitHub Actions** handles the notification
+- **GitHub Actions** handles all notifications
 
 ---
 
@@ -52,15 +58,23 @@ The agent script and the reviewer notification are **cleanly separated**:
 cp KT-Agent/.env.example KT-Agent/.env
 ```
 
-Edit `KT-Agent/.env` — only 3 things needed:
+Edit `KT-Agent/.env` with your values:
 
 ```env
 GITHUB_TOKEN=ghp_your_token_here
 GITHUB_REPO=your-org/your-repo
 GITHUB_BRANCH=main
+KT_CREATOR=your-github-username
+NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
 
-**GitHub Token permissions needed:** `contents: write` only.
+> `NODE_TLS_REJECT_UNAUTHORIZED=0` is needed on corporate networks (e.g. Cognizant)
+> where a company SSL certificate is installed. Safe to use locally.
+
+> `KT_CREATOR` is your GitHub username — embedded in the commit message so the
+> review-closed workflow knows who to notify when review is complete.
+
+**GitHub Token permissions needed:** `contents: write` + `issues: write`
 
 ### 2. Configure GitHub Actions (for reviewer notification)
 
@@ -84,19 +98,81 @@ In your repo → **Settings → Secrets and variables → Actions**:
 
 ## Running the agent
 
-```bash
-# macOS / Linux — from project root
-export $(cat KT-Agent/.env | xargs) && node KT-Agent/scripts/generate-kt.js .
+Every time you open a **new terminal**, run these commands in order:
 
-# Windows PowerShell
-Get-Content KT-Agent\.env | ForEach-Object {
-  $name, $value = $_ -split '=', 2
-  [System.Environment]::SetEnvironmentVariable($name, $value)
-}
+### Step 1 — Load environment variables
+
+**Windows PowerShell:**
+```powershell
+Get-Content KT-Agent\.env | Where-Object { $_ -notmatch '^\s*#' -and $_ -match '=' } | ForEach-Object { $name, $value = $_ -split '=', 2; [System.Environment]::SetEnvironmentVariable($name, $value.Trim()) }
+```
+
+**macOS / Linux:**
+```bash
+export $(cat KT-Agent/.env | grep -v '^#' | xargs)
+```
+
+> ⚠️ This step is required every time you open a new terminal.
+> Environment variables are not persisted between terminal sessions.
+
+### Step 2 — Set SSL bypass (corporate network only)
+
+**Windows PowerShell:**
+```powershell
+$env:NODE_TLS_REJECT_UNAUTHORIZED="0"
+```
+
+**macOS / Linux:**
+```bash
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+```
+
+> Skip this step if `NODE_TLS_REJECT_UNAUTHORIZED=0` is already in your `.env` —
+> Step 1 will have loaded it automatically.
+
+### Step 3 — Run the agent
+
+**Windows PowerShell:**
+```powershell
 node KT-Agent\scripts\generate-kt.js .
 ```
 
-Or via VSCode: `Ctrl+Shift+P` → **Tasks: Run Task** → **KT-Agent: Generate KT Document**
+**macOS / Linux:**
+```bash
+node KT-Agent/scripts/generate-kt.js .
+```
+
+### Expected output
+```
+🤖 KT-Agent starting...
+📁 Analyzing project at: .
+✅ Found: 18 Java files, 10 endpoints
+ℹ️  ANTHROPIC_API_KEY not set — using static summary instead.
+📄 KT document saved: KT-Agent/output/KT-Doc-<timestamp>.md
+✅ Committed to GitHub: https://github.com/your-org/your-repo/blob/main/KT-Agent/output/...
+⏳ GitHub Actions will now trigger reviewer notification...
+✅ KT-Agent complete.
+```
+
+---
+
+## Workflows
+
+Two GitHub Actions workflows handle notifications:
+
+| File | Triggers on | Does |
+|------|------------|------|
+| `kt-agent.yml` | Push to `KT-Agent/output/*.md` | Creates review issue, assigns to `KT_REVIEWER` |
+| `kt-review-closed.yml` | Issue closed | Enforces checklist, notifies `KT_CREATOR` on completion |
+
+### Checklist enforcement
+If the reviewer closes the issue **without ticking all boxes**:
+- Issue is **automatically reopened**
+- Warning comment posted tagging the reviewer
+
+If closed **with all boxes ticked**:
+- Completion comment posted tagging `@KT_CREATOR`
+- Creator gets GitHub email notification
 
 ---
 
@@ -104,8 +180,8 @@ Or via VSCode: `Ctrl+Shift+P` → **Tasks: Run Task** → **KT-Agent: Generate K
 
 | Mode | When | Result |
 |------|------|--------|
-| **Static** (default) | No `ANTHROPIC_API_KEY` | Auto-generated 3-paragraph summary from code analysis |
-| **AI-powered** | `ANTHROPIC_API_KEY` set in `.env` | Claude writes a narrative overview from actual source snippets |
+| **Static** (default) | No `ANTHROPIC_API_KEY` | Auto-generated summary from code analysis |
+| **AI-powered** | `ANTHROPIC_API_KEY` set in `.env` | Claude writes a narrative overview |
 
 Both modes produce an equally complete KT document.
 
@@ -127,6 +203,20 @@ Sections included:
 
 ---
 
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `GITHUB_TOKEN or GITHUB_REPO not set` | Run Step 1 (load env vars) before running agent |
+| `fetch failed` | Run Step 2 (SSL bypass) — corporate network issue |
+| `0 endpoints detected` | Ensure `generate-kt.js` is the latest version |
+| `git push rejected` | Run `git pull origin main --rebase` then push again |
+| Issue not created | Check `GH_PAT` secret is set in GitHub Actions secrets |
+| Reviewer not notified | Check `KT_REVIEWER` variable is set in GitHub Actions variables |
+
+---
+
 ## Making it generic
 
-Drop `KT-Agent/` into the root of any Spring Boot project. It works with any project that follows standard package conventions (`controller/`, `service/`, `repository/`, `entity/`, `dto/`).
+Drop `KT-Agent/` into the root of any Spring Boot project. It works with any project
+that follows standard package conventions (`controller/`, `service/`, `repository/`, `entity/`, `dto/`).
