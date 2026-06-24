@@ -447,39 +447,6 @@ _To regenerate: \`node KT-Agent/scripts/generate-kt.js\`_
 }
 
 // ─── GITHUB COMMIT ────────────────────────────────────────────────────────────
-async function deleteOldKTDocs(token, repo, branch, currentFileName) {
-  // List all files in KT-Agent/output/ and delete any old KT-Doc-*.md files
-  try {
-    const listRes = await fetch(`https://api.github.com/repos/${repo}/contents/KT-Agent/output?ref=${branch}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
-    });
-    if (!listRes.ok) return;
-
-    const files = await listRes.json();
-    const oldDocs = files.filter(f =>
-      f.name.startsWith("KT-Doc-") &&
-      f.name.endsWith(".md") &&
-      f.name !== currentFileName
-    );
-
-    for (const oldDoc of oldDocs) {
-      const delRes = await fetch(`https://api.github.com/repos/${repo}/contents/KT-Agent/output/${oldDoc.name}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
-        body: JSON.stringify({
-          message: `docs(kt-agent): remove old KT document ${oldDoc.name}`,
-          sha: oldDoc.sha,
-          branch
-        })
-      });
-      if (delRes.ok) console.log(`🗑️  Deleted old KT doc: ${oldDoc.name}`);
-      else console.warn(`⚠️  Could not delete ${oldDoc.name}`);
-    }
-  } catch (e) {
-    console.warn("⚠️  Could not clean old KT docs:", e.message);
-  }
-}
-
 async function commitToGitHub(filePath, content) {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
@@ -492,17 +459,85 @@ async function commitToGitHub(filePath, content) {
   }
 
   const fileName = path.basename(filePath);
-  const repoPath = `KT-Agent/output/${fileName}`;
-  const encoded = Buffer.from(content).toString("base64");
+  const newRepoPath = `KT-Agent/output/${fileName}`;
+  const newEncoded = Buffer.from(content).toString("base64");
 
-  // Delete old KT docs first — keep only the latest
-  await deleteOldKTDocs(token, repo, branch, fileName);
+  // ── Step 1: Get current branch SHA ─────────────────────────────────────────
+  const branchRes = await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${branch}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+  });
+  if (!branchRes.ok) throw new Error(`Could not get branch ref: ${branchRes.status}`);
+  const branchData = await branchRes.json();
+  const latestCommitSha = branchData.object.sha;
 
-  // Also delete locally — keep only the latest
+  // ── Step 2: Get current tree SHA ────────────────────────────────────────────
+  const commitRes = await fetch(`https://api.github.com/repos/${repo}/git/commits/${latestCommitSha}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+  });
+  if (!commitRes.ok) throw new Error(`Could not get commit: ${commitRes.status}`);
+  const commitData = await commitRes.json();
+  const baseTreeSha = commitData.tree.sha;
+
+  // ── Step 3: List old KT docs to delete ──────────────────────────────────────
+  const listRes = await fetch(`https://api.github.com/repos/${repo}/contents/KT-Agent/output?ref=${branch}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+  });
+  const oldDocs = listRes.ok
+    ? (await listRes.json()).filter(f => f.name.startsWith("KT-Doc-") && f.name.endsWith(".md") && f.name !== fileName)
+    : [];
+
+  if (oldDocs.length > 0) {
+    console.log(`🗑️  Will remove ${oldDocs.length} old KT doc(s) in same commit`);
+  }
+
+  // ── Step 4: Create new blob for the new KT doc ──────────────────────────────
+  const blobRes = await fetch(`https://api.github.com/repos/${repo}/git/blobs`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
+    body: JSON.stringify({ content: newEncoded, encoding: "base64" })
+  });
+  if (!blobRes.ok) throw new Error(`Could not create blob: ${blobRes.status}`);
+  const blobData = await blobRes.json();
+
+  // ── Step 5: Build tree — add new file + delete old files (null sha = delete)
+  const treeItems = [
+    { path: newRepoPath, mode: "100644", type: "blob", sha: blobData.sha }
+  ];
+  for (const old of oldDocs) {
+    treeItems.push({ path: `KT-Agent/output/${old.name}`, mode: "100644", type: "blob", sha: null });
+  }
+
+  const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
+    body: JSON.stringify({ base_tree: baseTreeSha, tree: treeItems })
+  });
+  if (!treeRes.ok) throw new Error(`Could not create tree: ${treeRes.status}`);
+  const treeData = await treeRes.json();
+
+  // ── Step 6: Create a single commit with add + delete together ───────────────
+  const commitMsg = `docs(kt-agent): add KT document ${fileName}\n\nAuto-generated by KT-Agent at ${new Date().toISOString()}${creator ? "\n[creator:" + creator + "]" : ""}${oldDocs.length > 0 ? "\n[replaces:" + oldDocs.map(f => f.name).join(",") + "]" : ""}`;
+
+  const newCommitRes = await fetch(`https://api.github.com/repos/${repo}/git/commits`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
+    body: JSON.stringify({ message: commitMsg, tree: treeData.sha, parents: [latestCommitSha] })
+  });
+  if (!newCommitRes.ok) throw new Error(`Could not create commit: ${newCommitRes.status}`);
+  const newCommitData = await newCommitRes.json();
+
+  // ── Step 7: Update branch ref to point to new commit ────────────────────────
+  const refRes = await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${branch}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
+    body: JSON.stringify({ sha: newCommitData.sha })
+  });
+  if (!refRes.ok) throw new Error(`Could not update branch ref: ${refRes.status}`);
+
+  // ── Step 8: Delete old docs locally too ─────────────────────────────────────
   const localOutputDir = path.dirname(filePath);
   try {
-    const localFiles = fs.readdirSync(localOutputDir);
-    for (const f of localFiles) {
+    for (const f of fs.readdirSync(localOutputDir)) {
       if (f.startsWith("KT-Doc-") && f.endsWith(".md") && f !== fileName) {
         fs.unlinkSync(path.join(localOutputDir, f));
         console.log(`🗑️  Deleted old local KT doc: ${f}`);
@@ -512,31 +547,10 @@ async function commitToGitHub(filePath, content) {
     console.warn("⚠️  Could not clean local old KT docs:", e.message);
   }
 
-  let sha;
-  try {
-    const getRes = await fetch(`https://api.github.com/repos/${repo}/contents/${repoPath}?ref=${branch}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
-    });
-    if (getRes.ok) sha = (await getRes.json()).sha;
-  } catch { }
-
-  const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${repoPath}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
-    body: JSON.stringify({
-      message: `docs(kt-agent): add KT document ${fileName}\n\nAuto-generated by KT-Agent at ${new Date().toISOString()}${creator ? "\n[creator:" + creator + "]" : ""}`,
-      content: encoded,
-      branch,
-      ...(sha ? { sha } : {})
-    })
-  });
-
-  if (!putRes.ok) throw new Error(`GitHub commit failed: ${putRes.status} — ${await putRes.text()}`);
-
-  const result = await putRes.json();
-  console.log(`✅ Committed to GitHub: ${result.content.html_url}`);
+  const fileUrl = `https://github.com/${repo}/blob/${branch}/${newRepoPath}`;
+  console.log(`✅ Committed to GitHub (single commit): ${fileUrl}`);
   console.log(`⏳ GitHub Actions will now trigger reviewer notification...`);
-  return result.content.html_url;
+  return fileUrl;
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
