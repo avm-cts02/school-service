@@ -568,7 +568,17 @@ async function main() {
   console.log(`📄 KT document saved: ${OUTPUT_FILE}`);
 
   const githubUrl = await commitToGitHub(OUTPUT_FILE, document);
-  if (githubUrl) console.log(`🔗 View on GitHub: ${githubUrl}`);
+  if (githubUrl) {
+    console.log(`🔗 View on GitHub: ${githubUrl}`);
+    // Delete local file after successful GitHub commit
+    // to avoid local/remote sync conflicts on next git pull
+    try {
+      fs.unlinkSync(OUTPUT_FILE);
+      console.log(`🧹 Local KT doc removed (committed to GitHub — no local copy needed)`);
+    } catch (e) {
+      console.warn("⚠️  Could not remove local KT doc:", e.message);
+    }
+  }
 
   console.log("✅ KT-Agent complete.");
 }
