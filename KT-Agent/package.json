@@ -1,0 +1,14 @@
+{
+  "name": "kt-agent",
+  "version": "1.0.0",
+  "description": "Knowledge Transfer Document Generator for Spring Boot Microservices",
+  "main": "scripts/generate-kt.js",
+  "scripts": {
+    "generate": "node scripts/generate-kt.js"
+  },
+  "keywords": ["kt", "knowledge-transfer", "documentation", "springboot"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

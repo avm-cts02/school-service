@@ -1,0 +1,27 @@
+# Maven
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+*.swp
+
+# VSCode (keep tasks/launch/settings, ignore local overrides)
+.vscode/*.code-workspace
+
+# KT-Agent secrets — NEVER commit
+KT-Agent/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

@@ -1,0 +1,8 @@
+# KT-Agent Output Directory
+
+This directory contains auto-generated Knowledge Transfer documents.
+
+Each document is named: `KT-Doc-<YYYY-MM-DDTHH-MM-SS>.md`
+
+**Do not manually edit files in this directory.**  
+They are auto-generated and committed by KT-Agent.

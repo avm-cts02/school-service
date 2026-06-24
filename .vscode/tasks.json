@@ -1,0 +1,51 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "KT-Agent: Generate KT Document",
+      "type": "shell",
+      "command": "node KT-Agent/scripts/generate-kt.js .",
+      "options": {
+        "env": {
+          "GITHUB_TOKEN":      "${env:GITHUB_TOKEN}",
+          "GITHUB_REPO":       "${env:GITHUB_REPO}",
+          "GITHUB_BRANCH":     "${env:GITHUB_BRANCH}",
+          "KT_REVIEWER":       "${env:KT_REVIEWER}",
+          "ANTHROPIC_API_KEY": "${env:ANTHROPIC_API_KEY}"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "new",
+        "showReuseMessage": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Spring Boot: Run Application",
+      "type": "shell",
+      "command": "mvn spring-boot:run",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "Maven: Clean Install",
+      "type": "shell",
+      "command": "mvn clean install -DskipTests",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

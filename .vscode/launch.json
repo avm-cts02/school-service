@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Run TeacherServiceApplication",
+      "request": "launch",
+      "mainClass": "com.school.teacher.TeacherServiceApplication",
+      "projectName": "teacher-service"
+    },
+    {
+      "type": "java",
+      "name": "Debug TeacherServiceApplication",
+      "request": "launch",
+      "mainClass": "com.school.teacher.TeacherServiceApplication",
+      "projectName": "teacher-service",
+      "vmArgs": "-Dspring.profiles.active=dev"
+    }
+  ]
+}
