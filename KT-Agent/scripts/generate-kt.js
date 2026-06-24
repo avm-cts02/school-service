@@ -21,14 +21,14 @@
  * KT-Agent/output/ for new commits and handles reviewer notification.
  */
 
-const fs   = require("fs");
+const fs = require("fs");
 const path = require("path");
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const PROJECT_ROOT = process.argv[2] || path.resolve(__dirname, "../..");
-const OUTPUT_DIR   = path.join(PROJECT_ROOT, "KT-Agent", "output");
-const TIMESTAMP    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-const OUTPUT_FILE  = path.join(OUTPUT_DIR, `KT-Doc-${TIMESTAMP}.md`);
+const OUTPUT_DIR = path.join(PROJECT_ROOT, "KT-Agent", "output");
+const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+const OUTPUT_FILE = path.join(OUTPUT_DIR, `KT-Doc-${TIMESTAMP}.md`);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function readFileSafe(filePath) {
@@ -64,16 +64,16 @@ function analyzeProject() {
 
   for (const f of files) {
     const content = readFileSafe(f) || "";
-    const name    = path.basename(f);
+    const name = path.basename(f);
     const relPath = rel(f);
 
     if (f.endsWith("pom.xml") && !f.includes("/src/")) {
-      const nameMatch    = content.match(/<artifactId>([^<]+)<\/artifactId>/);
+      const nameMatch = content.match(/<artifactId>([^<]+)<\/artifactId>/);
       const versionMatch = content.match(/<version>([^<]+)<\/version>/);
-      const javaMatch    = content.match(/<java\.version>([^<]+)<\/java\.version>/);
-      if (nameMatch)    appName    = nameMatch[1];
+      const javaMatch = content.match(/<java\.version>([^<]+)<\/java\.version>/);
+      if (nameMatch) appName = nameMatch[1];
       if (versionMatch) appVersion = versionMatch[1];
-      if (javaMatch)    javaVersion = javaMatch[1];
+      if (javaMatch) javaVersion = javaMatch[1];
       const depMatches = [...content.matchAll(/<artifactId>(spring-boot-starter[^<]*)<\/artifactId>/g)];
       dependencies = depMatches.map(m => m[1]);
       continue;
@@ -81,32 +81,53 @@ function analyzeProject() {
 
     if (f.endsWith("application.properties") || f.endsWith("application.yml")) {
       const portMatch = content.match(/server\.port\s*=\s*(\d+)/);
-      const dbMatch   = content.match(/spring\.datasource\.url\s*=\s*(.+)/);
+      const dbMatch = content.match(/spring\.datasource\.url\s*=\s*(.+)/);
       if (portMatch) serverPort = portMatch[1];
-      if (dbMatch)   dbInfo = dbMatch[1].trim();
+      if (dbMatch) dbInfo = dbMatch[1].trim();
       continue;
     }
 
     if (!name.endsWith(".java")) continue;
 
     const lower = relPath.toLowerCase();
-    if      (lower.includes("/controller/")) layers.controller.push({ name, relPath, content });
-    else if (lower.includes("/service/"))    layers.service.push({ name, relPath, content });
+    if (lower.includes("/controller/")) layers.controller.push({ name, relPath, content });
+    else if (lower.includes("/service/")) layers.service.push({ name, relPath, content });
     else if (lower.includes("/repository/")) layers.repository.push({ name, relPath, content });
-    else if (lower.includes("/entity/"))     layers.entity.push({ name, relPath, content });
-    else if (lower.includes("/dto/"))        layers.dto.push({ name, relPath, content });
-    else if (lower.includes("/exception/"))  layers.exception.push({ name, relPath, content });
-    else if (lower.includes("/config/"))     layers.config.push({ name, relPath, content });
-    else                                     layers.other.push({ name, relPath, content });
+    else if (lower.includes("/entity/")) layers.entity.push({ name, relPath, content });
+    else if (lower.includes("/dto/")) layers.dto.push({ name, relPath, content });
+    else if (lower.includes("/exception/")) layers.exception.push({ name, relPath, content });
+    else if (lower.includes("/config/")) layers.config.push({ name, relPath, content });
+    else layers.other.push({ name, relPath, content });
 
     if (lower.includes("/controller/")) {
       const classMapping = (content.match(/@RequestMapping\(["']([^"']+)["']/) || [])[1] || "";
-      const methods = [...content.matchAll(/@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\(?(?:["']([^"']*?)["'])?\)?[\s\S]*?(?:ResponseEntity|ApiResponseDTO)[^)]*\)\s+(\w+)\s*\(([^)]*)\)/g)];
-      for (const m of methods) {
-        const verb    = m[1].replace("Mapping", "").toUpperCase();
-        const subPath = m[2] || "";
-        const method  = m[3];
-        endpoints.push({ verb, path: classMapping + subPath, method });
+      // Line-by-line scan — handles @Operation/@ApiResponses between annotation and method
+      const lines = content.split("\n");
+      let pendingVerb = null;
+      let pendingPath = "";
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        const mapMatch = trimmed.match(/^@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)(\(.*)?$/);
+        if (mapMatch) {
+          pendingVerb = mapMatch[1].replace("Mapping", "").toUpperCase();
+          const block = lines.slice(i, i + 4).join(" ");
+          const pathMatch = block.match(/["']([^"']*\/[^"']*)["']/);
+          pendingPath = pathMatch ? pathMatch[1] : "";
+          continue;
+        }
+        if (pendingVerb) {
+          const methodMatch = trimmed.match(/public\s+\S+\s+(\w+)\s*\(/);
+          if (methodMatch) {
+            endpoints.push({ verb: pendingVerb, path: classMapping + pendingPath, method: methodMatch[1] });
+            pendingVerb = null;
+            pendingPath = "";
+          }
+          if (trimmed.startsWith("@") && !trimmed.startsWith("@ApiResponse") &&
+            !trimmed.startsWith("@Operation") && !trimmed.startsWith("@Parameter") &&
+            !trimmed.startsWith("@Valid")) {
+            pendingVerb = null;
+          }
+        }
       }
     }
   }
@@ -117,9 +138,9 @@ function analyzeProject() {
 // ─── STATIC SUMMARY (used when no ANTHROPIC_API_KEY) ─────────────────────────
 function buildStaticSummary(analysis) {
   const { appName, layers, endpoints, dbInfo } = analysis;
-  const entityNames  = layers.entity.map(e => e.name.replace(".java", "")).join(", ") || "core entities";
-  const totalFiles   = Object.values(layers).flat().length;
-  const deptList     = layers.controller.map(c => c.name.replace(".java","")).join(", ") || "controllers";
+  const entityNames = layers.entity.map(e => e.name.replace(".java", "")).join(", ") || "core entities";
+  const totalFiles = Object.values(layers).flat().length;
+  const deptList = layers.controller.map(c => c.name.replace(".java", "")).join(", ") || "controllers";
 
   return `This microservice (**${appName}**) is a Spring Boot REST API that manages ${entityNames} data for a school management system. It exposes **${endpoints.length} REST endpoints** across ${deptList}, backed by a **${dbInfo}** data store.
 
@@ -153,7 +174,7 @@ Analyze this Spring Boot microservice project called "${appName}" and write a co
 
 Database: ${dbInfo}
 Endpoints detected: ${endpoints.length}
-Layers: ${Object.entries(analysis.layers).filter(([,v])=>v.length>0).map(([k,v])=>`${k}(${v.length})`).join(", ")}
+Layers: ${Object.entries(analysis.layers).filter(([, v]) => v.length > 0).map(([k, v]) => `${k}(${v.length})`).join(", ")}
 
 Sample code snippets:
 ${snippet}
@@ -189,7 +210,7 @@ Write in a professional but approachable tone. Do NOT use bullet points — use 
 async function buildDocument(analysis) {
   const { appName, appVersion, javaVersion, dependencies, dbInfo, serverPort, layers, endpoints } = analysis;
 
-  const now          = new Date();
+  const now = new Date();
   const readableDate = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "long" });
   const overviewText = await tryGetAISummary(analysis);
 
@@ -210,7 +231,7 @@ async function buildDocument(analysis) {
     .join("\n");
 
   const exceptionList = layers.exception.map(e => `- \`${e.name}\``).join("\n") || "- None detected";
-  const depList       = dependencies.map(d => `- \`${d}\``).join("\n") || "- See pom.xml";
+  const depList = dependencies.map(d => `- \`${d}\``).join("\n") || "- See pom.xml";
 
   return `# 📘 Knowledge Transfer Document
 ## Project: \`${appName}\`
@@ -302,9 +323,9 @@ ${layerTable}
 \`\`\`
 src/main/java/
 ${Object.entries(layers)
-    .filter(([, v]) => v.length > 0)
-    .map(([k, v]) => `  ├── ${k}/\n${v.map(f => `  │   └── ${f.name}`).join("\n")}`)
-    .join("\n")}
+      .filter(([, v]) => v.length > 0)
+      .map(([k, v]) => `  ├── ${k}/\n${v.map(f => `  │   └── ${f.name}`).join("\n")}`)
+      .join("\n")}
 \`\`\`
 
 ---
@@ -425,8 +446,8 @@ _To regenerate: \`node KT-Agent/scripts/generate-kt.js\`_
 
 // ─── GITHUB COMMIT ────────────────────────────────────────────────────────────
 async function commitToGitHub(filePath, content) {
-  const token  = process.env.GITHUB_TOKEN;
-  const repo   = process.env.GITHUB_REPO;
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPO;
   const branch = process.env.GITHUB_BRANCH || "main";
 
   if (!token || !repo) {
@@ -435,7 +456,7 @@ async function commitToGitHub(filePath, content) {
   }
 
   const repoPath = `KT-Agent/output/${path.basename(filePath)}`;
-  const encoded  = Buffer.from(content).toString("base64");
+  const encoded = Buffer.from(content).toString("base64");
 
   let sha;
   try {
@@ -443,7 +464,7 @@ async function commitToGitHub(filePath, content) {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
     });
     if (getRes.ok) sha = (await getRes.json()).sha;
-  } catch {}
+  } catch { }
 
   const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${repoPath}`, {
     method: "PUT",
