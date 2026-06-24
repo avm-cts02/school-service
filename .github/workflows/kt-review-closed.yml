@@ -1,0 +1,113 @@
+name: "KT-Agent: Review Closed Handler"
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  handle-review-closed:
+    name: Handle KT Review Issue Closed
+    runs-on: ubuntu-latest
+
+    if: contains(github.event.issue.title, '[KT-Agent] Review requested')
+
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Extract KT doc creator from commit message
+        id: creator
+        run: |
+          DOC_NAME=$(echo "${{ github.event.issue.title }}" | sed 's/\[KT-Agent\] Review requested: //')
+          echo "doc_name=$DOC_NAME" >> $GITHUB_OUTPUT
+
+          COMMIT_MSG=$(git log --oneline --all --grep="$DOC_NAME" --format="%s %b" | head -1)
+          CREATOR=$(echo "$COMMIT_MSG" | grep -oP '(?<=\[creator:)[^\]]+' || echo "")
+          echo "creator=$CREATOR" >> $GITHUB_OUTPUT
+          echo "Detected creator: $CREATOR"
+
+      - name: Check checklist and notify
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          script: |
+            const issue     = context.payload.issue;
+            const issueBody = issue.body || "";
+            const issueNum  = issue.number;
+            const closedBy  = context.payload.sender.login;
+            const creator   = "${{ steps.creator.outputs.creator }}" || context.repo.owner;
+            const docName   = "${{ steps.creator.outputs.doc_name }}";
+
+            // ── Check if all checkboxes are ticked ──────────────────────────
+            const totalBoxes   = (issueBody.match(/- \[[ x]\]/g) || []).length;
+            const checkedBoxes = (issueBody.match(/- \[x\]/gi) || []).length;
+            const allChecked   = totalBoxes > 0 && checkedBoxes === totalBoxes;
+
+            console.log(`Checkboxes: ${checkedBoxes}/${totalBoxes} | Creator: ${creator} | ClosedBy: ${closedBy}`);
+
+            // ── Not all checked → reopen and warn ───────────────────────────
+            if (!allChecked) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issueNum,
+                state: "open"
+              });
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issueNum,
+                body: [
+                  "## ⚠️ Review Incomplete",
+                  "",
+                  `@${closedBy} — this issue was closed but **${totalBoxes - checkedBoxes} checklist item(s)** are still unchecked.`,
+                  "",
+                  "Please complete all review items before closing:",
+                  "- [ ] Architecture diagram is accurate",
+                  "- [ ] All REST endpoints are listed correctly",
+                  "- [ ] Data models reflect current entity structure",
+                  "- [ ] Exception handling section is complete",
+                  "- [ ] How-to-run instructions work",
+                  "",
+                  "The issue has been **reopened** automatically.",
+                  "",
+                  "---",
+                  "_KT-Agent enforcement_"
+                ].join("\n")
+              });
+
+              console.log(`⚠️ Issue #${issueNum} reopened — ${checkedBoxes}/${totalBoxes} checked`);
+              return;
+            }
+
+            // ── All checked → notify creator ────────────────────────────────
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: issueNum,
+              body: [
+                "## ✅ Review Complete",
+                "",
+                `@${creator} — your KT document **${docName}** has been fully reviewed and approved by @${closedBy}.`,
+                "",
+                `**Document:** ${docName}`,
+                `**Reviewed by:** @${closedBy}`,
+                `**Closed at:** ${new Date().toISOString()}`,
+                "",
+                "All checklist items were completed ✅",
+                "",
+                "---",
+                "_Auto-notified by KT-Agent_"
+              ].join("\n")
+            });
+
+            console.log(`✅ Creator @${creator} notified — review complete by @${closedBy}`);
+            core.summary.addRaw(`### ✅ KT Review Complete\n**Doc:** ${docName}\n**Reviewed by:** @${closedBy}\n**Creator notified:** @${creator}`);
+            await core.summary.write();
