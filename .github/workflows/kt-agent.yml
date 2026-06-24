@@ -16,36 +16,29 @@ jobs:
       issues: write
 
     steps:
-      - name: Check if a new KT doc was added (not deleted)
-        id: check
-        run: |
-          # Get the list of files ADDED in this commit (not modified or deleted)
-          ADDED=$(echo '${{ toJson(github.event.head_commit.added) }}' | tr -d '[]"' | tr ',' '\n' | grep "KT-Agent/output/KT-Doc-.*\.md" | head -1)
-          echo "added_file=$ADDED" >> $GITHUB_OUTPUT
-          if [ -n "$ADDED" ]; then
-            echo "should_notify=true" >> $GITHUB_OUTPUT
-            echo "✅ New KT doc detected: $ADDED"
-          else
-            echo "should_notify=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No new KT doc added in this commit — skipping notification."
-          fi
-
       - name: Checkout repository
-        if: steps.check.outputs.should_notify == 'true'
         uses: actions/checkout@v4
 
-      - name: Get KT doc details
+      - name: Check if a new KT doc exists (not a delete-only commit)
         id: kt-doc
-        if: steps.check.outputs.should_notify == 'true'
         run: |
-          DOC_FILE="${{ steps.check.outputs.added_file }}"
-          echo "doc_file=$DOC_FILE" >> $GITHUB_OUTPUT
-          echo "doc_name=$(basename $DOC_FILE)" >> $GITHUB_OUTPUT
-          echo "doc_url=https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/$DOC_FILE" >> $GITHUB_OUTPUT
-          echo "commit_url=https://github.com/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
+          # Find the latest KT doc in output folder
+          DOC_FILE=$(find KT-Agent/output -name "KT-Doc-*.md" | sort | tail -1)
+
+          if [ -n "$DOC_FILE" ]; then
+            echo "should_notify=true" >> $GITHUB_OUTPUT
+            echo "doc_file=$DOC_FILE" >> $GITHUB_OUTPUT
+            echo "doc_name=$(basename $DOC_FILE)" >> $GITHUB_OUTPUT
+            echo "doc_url=https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/$DOC_FILE" >> $GITHUB_OUTPUT
+            echo "commit_url=https://github.com/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "✅ KT doc found: $DOC_FILE"
+          else
+            echo "should_notify=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No KT doc found — skipping notification."
+          fi
 
       - name: Create reviewer notification issue
-        if: steps.check.outputs.should_notify == 'true'
+        if: steps.kt-doc.outputs.should_notify == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
@@ -54,11 +47,6 @@ jobs:
             const docUrl    = "${{ steps.kt-doc.outputs.doc_url }}";
             const commitUrl = "${{ steps.kt-doc.outputs.commit_url }}";
             const reviewer  = "${{ vars.KT_REVIEWER }}";
-
-            if (!docName) {
-              core.warning("Could not detect KT doc file — skipping issue creation.");
-              return;
-            }
 
             const body = [
               "## 📘 KT Document Ready for Review",
