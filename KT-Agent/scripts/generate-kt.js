@@ -23,14 +23,14 @@
  * KT-Agent/output/ for new commits and handles reviewer notification.
  */
 
-const fs   = require("fs");
+const fs = require("fs");
 const path = require("path");
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const PROJECT_ROOT = process.argv[2] || path.resolve(__dirname, "../..");
-const OUTPUT_DIR   = path.join(PROJECT_ROOT, "KT-Agent", "output");
-const TIMESTAMP    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-const OUTPUT_FILE  = path.join(OUTPUT_DIR, `KT-Doc-${TIMESTAMP}.md`);
+const OUTPUT_DIR = path.join(PROJECT_ROOT, "KT-Agent", "output");
+const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+const OUTPUT_FILE = path.join(OUTPUT_DIR, `KT-Doc-${TIMESTAMP}.md`);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function readFileSafe(filePath) {
@@ -66,16 +66,16 @@ function analyzeProject() {
 
   for (const f of files) {
     const content = readFileSafe(f) || "";
-    const name    = path.basename(f);
+    const name = path.basename(f);
     const relPath = rel(f);
 
     if (f.endsWith("pom.xml") && !f.includes("/src/")) {
-      const nameMatch    = content.match(/<artifactId>([^<]+)<\/artifactId>/);
+      const nameMatch = content.match(/<artifactId>([^<]+)<\/artifactId>/);
       const versionMatch = content.match(/<version>([^<]+)<\/version>/);
-      const javaMatch    = content.match(/<java\.version>([^<]+)<\/java\.version>/);
-      if (nameMatch)    appName    = nameMatch[1];
+      const javaMatch = content.match(/<java\.version>([^<]+)<\/java\.version>/);
+      if (nameMatch) appName = nameMatch[1];
       if (versionMatch) appVersion = versionMatch[1];
-      if (javaMatch)    javaVersion = javaMatch[1];
+      if (javaMatch) javaVersion = javaMatch[1];
       const depMatches = [...content.matchAll(/<artifactId>(spring-boot-starter[^<]*)<\/artifactId>/g)];
       dependencies = depMatches.map(m => m[1]);
       continue;
@@ -83,23 +83,23 @@ function analyzeProject() {
 
     if (f.endsWith("application.properties") || f.endsWith("application.yml")) {
       const portMatch = content.match(/server\.port\s*=\s*(\d+)/);
-      const dbMatch   = content.match(/spring\.datasource\.url\s*=\s*(.+)/);
+      const dbMatch = content.match(/spring\.datasource\.url\s*=\s*(.+)/);
       if (portMatch) serverPort = portMatch[1];
-      if (dbMatch)   dbInfo = dbMatch[1].trim();
+      if (dbMatch) dbInfo = dbMatch[1].trim();
       continue;
     }
 
     if (!name.endsWith(".java")) continue;
 
-    const lower = relPath.toLowerCase();
-    if      (lower.includes("/controller/")) layers.controller.push({ name, relPath, content });
-    else if (lower.includes("/service/"))    layers.service.push({ name, relPath, content });
+    const lower = relPath.replace(/\\/g, '/').toLowerCase();
+    if (lower.includes("/controller/")) layers.controller.push({ name, relPath, content });
+    else if (lower.includes("/service/")) layers.service.push({ name, relPath, content });
     else if (lower.includes("/repository/")) layers.repository.push({ name, relPath, content });
-    else if (lower.includes("/entity/"))     layers.entity.push({ name, relPath, content });
-    else if (lower.includes("/dto/"))        layers.dto.push({ name, relPath, content });
-    else if (lower.includes("/exception/"))  layers.exception.push({ name, relPath, content });
-    else if (lower.includes("/config/"))     layers.config.push({ name, relPath, content });
-    else                                     layers.other.push({ name, relPath, content });
+    else if (lower.includes("/entity/")) layers.entity.push({ name, relPath, content });
+    else if (lower.includes("/dto/")) layers.dto.push({ name, relPath, content });
+    else if (lower.includes("/exception/")) layers.exception.push({ name, relPath, content });
+    else if (lower.includes("/config/")) layers.config.push({ name, relPath, content });
+    else layers.other.push({ name, relPath, content });
 
     if (lower.includes("/controller/")) {
       const classMapping = (content.match(/@RequestMapping\(["']([^"']+)["']/) || [])[1] || "";
@@ -125,8 +125,8 @@ function analyzeProject() {
             pendingPath = "";
           }
           if (trimmed.startsWith("@") && !trimmed.startsWith("@ApiResponse") &&
-              !trimmed.startsWith("@Operation") && !trimmed.startsWith("@Parameter") &&
-              !trimmed.startsWith("@Valid")) {
+            !trimmed.startsWith("@Operation") && !trimmed.startsWith("@Parameter") &&
+            !trimmed.startsWith("@Valid")) {
             pendingVerb = null;
           }
         }
@@ -140,9 +140,9 @@ function analyzeProject() {
 // ─── STATIC SUMMARY (used when no ANTHROPIC_API_KEY) ─────────────────────────
 function buildStaticSummary(analysis) {
   const { appName, layers, endpoints, dbInfo } = analysis;
-  const entityNames  = layers.entity.map(e => e.name.replace(".java", "")).join(", ") || "core entities";
-  const totalFiles   = Object.values(layers).flat().length;
-  const deptList     = layers.controller.map(c => c.name.replace(".java","")).join(", ") || "controllers";
+  const entityNames = layers.entity.map(e => e.name.replace(".java", "")).join(", ") || "core entities";
+  const totalFiles = Object.values(layers).flat().length;
+  const deptList = layers.controller.map(c => c.name.replace(".java", "")).join(", ") || "controllers";
 
   return `This microservice (**${appName}**) is a Spring Boot REST API that manages ${entityNames} data for a school management system. It exposes **${endpoints.length} REST endpoints** across ${deptList}, backed by a **${dbInfo}** data store.
 
@@ -176,7 +176,7 @@ Analyze this Spring Boot microservice project called "${appName}" and write a co
 
 Database: ${dbInfo}
 Endpoints detected: ${endpoints.length}
-Layers: ${Object.entries(analysis.layers).filter(([,v])=>v.length>0).map(([k,v])=>`${k}(${v.length})`).join(", ")}
+Layers: ${Object.entries(analysis.layers).filter(([, v]) => v.length > 0).map(([k, v]) => `${k}(${v.length})`).join(", ")}
 
 Sample code snippets:
 ${snippet}
@@ -212,7 +212,7 @@ Write in a professional but approachable tone. Do NOT use bullet points — use 
 async function buildDocument(analysis) {
   const { appName, appVersion, javaVersion, dependencies, dbInfo, serverPort, layers, endpoints } = analysis;
 
-  const now          = new Date();
+  const now = new Date();
   const readableDate = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "long" });
   const overviewText = await tryGetAISummary(analysis);
 
@@ -233,7 +233,7 @@ async function buildDocument(analysis) {
     .join("\n");
 
   const exceptionList = layers.exception.map(e => `- \`${e.name}\``).join("\n") || "- None detected";
-  const depList       = dependencies.map(d => `- \`${d}\``).join("\n") || "- See pom.xml";
+  const depList = dependencies.map(d => `- \`${d}\``).join("\n") || "- See pom.xml";
 
   return `# 📘 Knowledge Transfer Document
 ## Project: \`${appName}\`
@@ -325,9 +325,9 @@ ${layerTable}
 \`\`\`
 src/main/java/
 ${Object.entries(layers)
-    .filter(([, v]) => v.length > 0)
-    .map(([k, v]) => `  ├── ${k}/\n${v.map(f => `  │   └── ${f.name}`).join("\n")}`)
-    .join("\n")}
+      .filter(([, v]) => v.length > 0)
+      .map(([k, v]) => `  ├── ${k}/\n${v.map(f => `  │   └── ${f.name}`).join("\n")}`)
+      .join("\n")}
 \`\`\`
 
 ---
@@ -447,10 +447,43 @@ _To regenerate: \`node KT-Agent/scripts/generate-kt.js\`_
 }
 
 // ─── GITHUB COMMIT ────────────────────────────────────────────────────────────
+async function deleteOldKTDocs(token, repo, branch, currentFileName) {
+  // List all files in KT-Agent/output/ and delete any old KT-Doc-*.md files
+  try {
+    const listRes = await fetch(`https://api.github.com/repos/${repo}/contents/KT-Agent/output?ref=${branch}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+    });
+    if (!listRes.ok) return;
+
+    const files = await listRes.json();
+    const oldDocs = files.filter(f =>
+      f.name.startsWith("KT-Doc-") &&
+      f.name.endsWith(".md") &&
+      f.name !== currentFileName
+    );
+
+    for (const oldDoc of oldDocs) {
+      const delRes = await fetch(`https://api.github.com/repos/${repo}/contents/KT-Agent/output/${oldDoc.name}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
+        body: JSON.stringify({
+          message: `docs(kt-agent): remove old KT document ${oldDoc.name}`,
+          sha: oldDoc.sha,
+          branch
+        })
+      });
+      if (delRes.ok) console.log(`🗑️  Deleted old KT doc: ${oldDoc.name}`);
+      else console.warn(`⚠️  Could not delete ${oldDoc.name}`);
+    }
+  } catch (e) {
+    console.warn("⚠️  Could not clean old KT docs:", e.message);
+  }
+}
+
 async function commitToGitHub(filePath, content) {
-  const token   = process.env.GITHUB_TOKEN;
-  const repo    = process.env.GITHUB_REPO;
-  const branch  = process.env.GITHUB_BRANCH || "main";
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPO;
+  const branch = process.env.GITHUB_BRANCH || "main";
   const creator = process.env.KT_CREATOR || "";
 
   if (!token || !repo) {
@@ -458,8 +491,26 @@ async function commitToGitHub(filePath, content) {
     return null;
   }
 
-  const repoPath = `KT-Agent/output/${path.basename(filePath)}`;
-  const encoded  = Buffer.from(content).toString("base64");
+  const fileName = path.basename(filePath);
+  const repoPath = `KT-Agent/output/${fileName}`;
+  const encoded = Buffer.from(content).toString("base64");
+
+  // Delete old KT docs first — keep only the latest
+  await deleteOldKTDocs(token, repo, branch, fileName);
+
+  // Also delete locally — keep only the latest
+  const localOutputDir = path.dirname(filePath);
+  try {
+    const localFiles = fs.readdirSync(localOutputDir);
+    for (const f of localFiles) {
+      if (f.startsWith("KT-Doc-") && f.endsWith(".md") && f !== fileName) {
+        fs.unlinkSync(path.join(localOutputDir, f));
+        console.log(`🗑️  Deleted old local KT doc: ${f}`);
+      }
+    }
+  } catch (e) {
+    console.warn("⚠️  Could not clean local old KT docs:", e.message);
+  }
 
   let sha;
   try {
@@ -467,13 +518,13 @@ async function commitToGitHub(filePath, content) {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
     });
     if (getRes.ok) sha = (await getRes.json()).sha;
-  } catch {}
+  } catch { }
 
   const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${repoPath}`, {
     method: "PUT",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/vnd.github+json" },
     body: JSON.stringify({
-      message: `docs(kt-agent): add KT document ${path.basename(filePath)}\n\nAuto-generated by KT-Agent at ${new Date().toISOString()}${creator ? "\n[creator:" + creator + "]" : ""}`,
+      message: `docs(kt-agent): add KT document ${fileName}\n\nAuto-generated by KT-Agent at ${new Date().toISOString()}${creator ? "\n[creator:" + creator + "]" : ""}`,
       content: encoded,
       branch,
       ...(sha ? { sha } : {})
