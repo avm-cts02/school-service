@@ -22,8 +22,7 @@ jobs:
       - name: Get committed KT doc details
         id: kt-doc
         run: |
-          # Find the KT doc file that was just pushed in this commit
-          DOC_FILE=$(git diff-tree --no-commit-id -r --name-only ${{ github.sha }} | grep "KT-Agent/output/KT-Doc-.*\.md" | head -1)
+          DOC_FILE=$(find KT-Agent/output -name "KT-Doc-*.md" | sort | tail -1)
           echo "doc_file=$DOC_FILE" >> $GITHUB_OUTPUT
           echo "doc_name=$(basename $DOC_FILE)" >> $GITHUB_OUTPUT
           echo "doc_url=https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/$DOC_FILE" >> $GITHUB_OUTPUT
@@ -40,46 +39,36 @@ jobs:
             const reviewer  = "${{ vars.KT_REVIEWER }}";
 
             if (!docName) {
-              core.warning("Could not detect KT doc file in this push — skipping issue creation.");
+              core.warning("Could not detect KT doc file — skipping issue creation.");
               return;
             }
 
             const body = [
-              "## 📘 KT Document Ready for Review",
-              "",
-              reviewer ? `@${reviewer} — a new Knowledge Transfer document has been generated and committed.` : "A new Knowledge Transfer document has been generated and committed.",
-              "",
+              "## 📘 KT Document Ready for Review", "",
+              reviewer ? `@${reviewer} — a new KT document has been committed.` : "A new KT document has been committed.", "",
               `**Document:** [${docName}](${docUrl})`,
               `**Commit:** ${commitUrl}`,
-              `**Generated at:** ${new Date().toISOString()}`,
-              "",
+              `**Generated at:** ${new Date().toISOString()}`, "",
               "### What to review",
               "- [ ] Architecture diagram is accurate",
               "- [ ] All REST endpoints are listed correctly",
-              "- [ ] Data models reflect the current entity structure",
+              "- [ ] Data models reflect current entity structure",
               "- [ ] Exception handling section is complete",
-              "- [ ] How-to-run instructions work",
-              "",
-              "Please review the document and close this issue once approved.",
-              "",
-              "---",
-              "_Auto-created by KT-Agent GitHub Actions workflow_"
+              "- [ ] How-to-run instructions work", "",
+              "Close this issue once reviewed.",
+              "", "---",
+              "_Auto-created by KT-Agent_"
             ].join("\n");
 
-            const issuePayload = {
-              owner:    context.repo.owner,
-              repo:     context.repo.repo,
-              title:    `[KT-Agent] Review requested: ${docName}`,
+            const payload = {
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title:  `[KT-Agent] Review requested: ${docName}`,
               body,
-              labels:   ["kt-review", "documentation"],
+              labels: ["kt-review", "documentation"]
             };
 
-            // Only assign if reviewer is configured
-            if (reviewer) {
-              issuePayload.assignees = [reviewer];
-            }
+            if (reviewer) payload.assignees = [reviewer];
 
-            const issue = await github.rest.issues.create(issuePayload);
-            console.log(`📬 Review issue created: ${issue.data.html_url}`);
-            core.summary.addRaw(`### 📬 Reviewer Notified\n[View Issue](${issue.data.html_url})`);
-            await core.summary.write();
+            const issue = await github.rest.issues.create(payload);
+            console.log(`📬 Issue created: ${issue.data.html_url}`);
