@@ -16,19 +16,36 @@ jobs:
       issues: write
 
     steps:
+      - name: Check if a new KT doc was added (not deleted)
+        id: check
+        run: |
+          # Get the list of files ADDED in this commit (not modified or deleted)
+          ADDED=$(echo '${{ toJson(github.event.head_commit.added) }}' | tr -d '[]"' | tr ',' '\n' | grep "KT-Agent/output/KT-Doc-.*\.md" | head -1)
+          echo "added_file=$ADDED" >> $GITHUB_OUTPUT
+          if [ -n "$ADDED" ]; then
+            echo "should_notify=true" >> $GITHUB_OUTPUT
+            echo "✅ New KT doc detected: $ADDED"
+          else
+            echo "should_notify=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No new KT doc added in this commit — skipping notification."
+          fi
+
       - name: Checkout repository
+        if: steps.check.outputs.should_notify == 'true'
         uses: actions/checkout@v4
 
-      - name: Get committed KT doc details
+      - name: Get KT doc details
         id: kt-doc
+        if: steps.check.outputs.should_notify == 'true'
         run: |
-          DOC_FILE=$(find KT-Agent/output -name "KT-Doc-*.md" | sort | tail -1)
+          DOC_FILE="${{ steps.check.outputs.added_file }}"
           echo "doc_file=$DOC_FILE" >> $GITHUB_OUTPUT
           echo "doc_name=$(basename $DOC_FILE)" >> $GITHUB_OUTPUT
           echo "doc_url=https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/$DOC_FILE" >> $GITHUB_OUTPUT
           echo "commit_url=https://github.com/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Create reviewer notification issue
+        if: steps.check.outputs.should_notify == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
@@ -44,31 +61,38 @@ jobs:
             }
 
             const body = [
-              "## 📘 KT Document Ready for Review", "",
-              reviewer ? `@${reviewer} — a new KT document has been committed.` : "A new KT document has been committed.", "",
+              "## 📘 KT Document Ready for Review",
+              "",
+              reviewer ? `@${reviewer} — a new Knowledge Transfer document has been generated and committed.` : "A new Knowledge Transfer document has been generated and committed.",
+              "",
               `**Document:** [${docName}](${docUrl})`,
               `**Commit:** ${commitUrl}`,
-              `**Generated at:** ${new Date().toISOString()}`, "",
+              `**Generated at:** ${new Date().toISOString()}`,
+              "",
               "### What to review",
               "- [ ] Architecture diagram is accurate",
               "- [ ] All REST endpoints are listed correctly",
               "- [ ] Data models reflect current entity structure",
               "- [ ] Exception handling section is complete",
-              "- [ ] How-to-run instructions work", "",
-              "Close this issue once reviewed.",
-              "", "---",
-              "_Auto-created by KT-Agent_"
+              "- [ ] How-to-run instructions work",
+              "",
+              "Please review the document and close this issue once approved.",
+              "",
+              "---",
+              "_Auto-created by KT-Agent GitHub Actions workflow_"
             ].join("\n");
 
-            const payload = {
+            const issuePayload = {
               owner:  context.repo.owner,
               repo:   context.repo.repo,
               title:  `[KT-Agent] Review requested: ${docName}`,
               body,
-              labels: ["kt-review", "documentation"]
+              labels: ["kt-review", "documentation"],
             };
 
-            if (reviewer) payload.assignees = [reviewer];
+            if (reviewer) issuePayload.assignees = [reviewer];
 
-            const issue = await github.rest.issues.create(payload);
-            console.log(`📬 Issue created: ${issue.data.html_url}`);
+            const issue = await github.rest.issues.create(issuePayload);
+            console.log(`📬 Review issue created: ${issue.data.html_url}`);
+            core.summary.addRaw(`### 📬 Reviewer Notified\n[View Issue](${issue.data.html_url})`);
+            await core.summary.write();
