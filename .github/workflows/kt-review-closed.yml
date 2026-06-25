@@ -43,6 +43,9 @@ jobs:
             const closedBy  = context.payload.sender.login;
             const creator   = "${{ steps.creator.outputs.creator }}" || context.repo.owner;
             const docName   = "${{ steps.creator.outputs.doc_name }}";
+            // Support comma-separated reviewers in KT_REVIEWER (for display in comments)
+            const reviewerRaw = "${{ vars.KT_REVIEWER }}";
+            const reviewers   = reviewerRaw ? reviewerRaw.split(",").map(r => r.trim()).filter(Boolean) : [];
 
             // ── Check if all checkboxes are ticked ──────────────────────────
             const totalBoxes   = (issueBody.match(/- \[[ x]\]/g) || []).length;

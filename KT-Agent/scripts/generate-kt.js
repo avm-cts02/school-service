@@ -23,14 +23,35 @@
  * KT-Agent/output/ for new commits and handles reviewer notification.
  */
 
-const fs = require("fs");
+const fs   = require("fs");
 const path = require("path");
+
+// ─── AUTO-LOAD .env ──────────────────────────────────────────────────────────
+// Automatically loads KT-Agent/.env so no manual export step is needed.
+// Works when invoked via Claude Code agent, VSCode task, or direct node command.
+(function loadEnv() {
+  const envPath = path.resolve(__dirname, "../.env");
+  if (!fs.existsSync(envPath)) return;
+  const lines = fs.readFileSync(envPath, "utf8").split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key   = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim();
+    if (key && !process.env[key]) {   // don't override existing env vars
+      process.env[key] = value;
+    }
+  }
+  console.log("ℹ️  Loaded env from KT-Agent/.env");
+})();
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const PROJECT_ROOT = process.argv[2] || path.resolve(__dirname, "../..");
-const OUTPUT_DIR = path.join(PROJECT_ROOT, "KT-Agent", "output");
-const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-const OUTPUT_FILE = path.join(OUTPUT_DIR, `KT-Doc-${TIMESTAMP}.md`);
+const OUTPUT_DIR   = path.join(PROJECT_ROOT, "KT-Agent", "output");
+const TIMESTAMP    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+const OUTPUT_FILE  = path.join(OUTPUT_DIR, `KT-Doc-${TIMESTAMP}.md`);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function readFileSafe(filePath) {
@@ -66,16 +87,16 @@ function analyzeProject() {
 
   for (const f of files) {
     const content = readFileSafe(f) || "";
-    const name = path.basename(f);
+    const name    = path.basename(f);
     const relPath = rel(f);
 
     if (f.endsWith("pom.xml") && !f.includes("/src/")) {
-      const nameMatch = content.match(/<artifactId>([^<]+)<\/artifactId>/);
+      const nameMatch    = content.match(/<artifactId>([^<]+)<\/artifactId>/);
       const versionMatch = content.match(/<version>([^<]+)<\/version>/);
-      const javaMatch = content.match(/<java\.version>([^<]+)<\/java\.version>/);
-      if (nameMatch) appName = nameMatch[1];
+      const javaMatch    = content.match(/<java\.version>([^<]+)<\/java\.version>/);
+      if (nameMatch)    appName    = nameMatch[1];
       if (versionMatch) appVersion = versionMatch[1];
-      if (javaMatch) javaVersion = javaMatch[1];
+      if (javaMatch)    javaVersion = javaMatch[1];
       const depMatches = [...content.matchAll(/<artifactId>(spring-boot-starter[^<]*)<\/artifactId>/g)];
       dependencies = depMatches.map(m => m[1]);
       continue;
@@ -83,23 +104,23 @@ function analyzeProject() {
 
     if (f.endsWith("application.properties") || f.endsWith("application.yml")) {
       const portMatch = content.match(/server\.port\s*=\s*(\d+)/);
-      const dbMatch = content.match(/spring\.datasource\.url\s*=\s*(.+)/);
+      const dbMatch   = content.match(/spring\.datasource\.url\s*=\s*(.+)/);
       if (portMatch) serverPort = portMatch[1];
-      if (dbMatch) dbInfo = dbMatch[1].trim();
+      if (dbMatch)   dbInfo = dbMatch[1].trim();
       continue;
     }
 
     if (!name.endsWith(".java")) continue;
 
     const lower = relPath.replace(/\\/g, '/').toLowerCase();
-    if (lower.includes("/controller/")) layers.controller.push({ name, relPath, content });
-    else if (lower.includes("/service/")) layers.service.push({ name, relPath, content });
+    if      (lower.includes("/controller/")) layers.controller.push({ name, relPath, content });
+    else if (lower.includes("/service/"))    layers.service.push({ name, relPath, content });
     else if (lower.includes("/repository/")) layers.repository.push({ name, relPath, content });
-    else if (lower.includes("/entity/")) layers.entity.push({ name, relPath, content });
-    else if (lower.includes("/dto/")) layers.dto.push({ name, relPath, content });
-    else if (lower.includes("/exception/")) layers.exception.push({ name, relPath, content });
-    else if (lower.includes("/config/")) layers.config.push({ name, relPath, content });
-    else layers.other.push({ name, relPath, content });
+    else if (lower.includes("/entity/"))     layers.entity.push({ name, relPath, content });
+    else if (lower.includes("/dto/"))        layers.dto.push({ name, relPath, content });
+    else if (lower.includes("/exception/"))  layers.exception.push({ name, relPath, content });
+    else if (lower.includes("/config/"))     layers.config.push({ name, relPath, content });
+    else                                     layers.other.push({ name, relPath, content });
 
     if (lower.includes("/controller/")) {
       const classMapping = (content.match(/@RequestMapping\(["']([^"']+)["']/) || [])[1] || "";
@@ -125,8 +146,8 @@ function analyzeProject() {
             pendingPath = "";
           }
           if (trimmed.startsWith("@") && !trimmed.startsWith("@ApiResponse") &&
-            !trimmed.startsWith("@Operation") && !trimmed.startsWith("@Parameter") &&
-            !trimmed.startsWith("@Valid")) {
+              !trimmed.startsWith("@Operation") && !trimmed.startsWith("@Parameter") &&
+              !trimmed.startsWith("@Valid")) {
             pendingVerb = null;
           }
         }
@@ -140,9 +161,9 @@ function analyzeProject() {
 // ─── STATIC SUMMARY (used when no ANTHROPIC_API_KEY) ─────────────────────────
 function buildStaticSummary(analysis) {
   const { appName, layers, endpoints, dbInfo } = analysis;
-  const entityNames = layers.entity.map(e => e.name.replace(".java", "")).join(", ") || "core entities";
-  const totalFiles = Object.values(layers).flat().length;
-  const deptList = layers.controller.map(c => c.name.replace(".java", "")).join(", ") || "controllers";
+  const entityNames  = layers.entity.map(e => e.name.replace(".java", "")).join(", ") || "core entities";
+  const totalFiles   = Object.values(layers).flat().length;
+  const deptList     = layers.controller.map(c => c.name.replace(".java","")).join(", ") || "controllers";
 
   return `This microservice (**${appName}**) is a Spring Boot REST API that manages ${entityNames} data for a school management system. It exposes **${endpoints.length} REST endpoints** across ${deptList}, backed by a **${dbInfo}** data store.
 
@@ -176,7 +197,7 @@ Analyze this Spring Boot microservice project called "${appName}" and write a co
 
 Database: ${dbInfo}
 Endpoints detected: ${endpoints.length}
-Layers: ${Object.entries(analysis.layers).filter(([, v]) => v.length > 0).map(([k, v]) => `${k}(${v.length})`).join(", ")}
+Layers: ${Object.entries(analysis.layers).filter(([,v])=>v.length>0).map(([k,v])=>`${k}(${v.length})`).join(", ")}
 
 Sample code snippets:
 ${snippet}
@@ -212,7 +233,7 @@ Write in a professional but approachable tone. Do NOT use bullet points — use 
 async function buildDocument(analysis) {
   const { appName, appVersion, javaVersion, dependencies, dbInfo, serverPort, layers, endpoints } = analysis;
 
-  const now = new Date();
+  const now          = new Date();
   const readableDate = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "long" });
   const overviewText = await tryGetAISummary(analysis);
 
@@ -233,7 +254,7 @@ async function buildDocument(analysis) {
     .join("\n");
 
   const exceptionList = layers.exception.map(e => `- \`${e.name}\``).join("\n") || "- None detected";
-  const depList = dependencies.map(d => `- \`${d}\``).join("\n") || "- See pom.xml";
+  const depList       = dependencies.map(d => `- \`${d}\``).join("\n") || "- See pom.xml";
 
   return `# 📘 Knowledge Transfer Document
 ## Project: \`${appName}\`
@@ -325,9 +346,9 @@ ${layerTable}
 \`\`\`
 src/main/java/
 ${Object.entries(layers)
-      .filter(([, v]) => v.length > 0)
-      .map(([k, v]) => `  ├── ${k}/\n${v.map(f => `  │   └── ${f.name}`).join("\n")}`)
-      .join("\n")}
+    .filter(([, v]) => v.length > 0)
+    .map(([k, v]) => `  ├── ${k}/\n${v.map(f => `  │   └── ${f.name}`).join("\n")}`)
+    .join("\n")}
 \`\`\`
 
 ---
@@ -448,9 +469,9 @@ _To regenerate: \`node KT-Agent/scripts/generate-kt.js\`_
 
 // ─── GITHUB COMMIT ────────────────────────────────────────────────────────────
 async function commitToGitHub(filePath, content) {
-  const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPO;
-  const branch = process.env.GITHUB_BRANCH || "main";
+  const token   = process.env.GITHUB_TOKEN;
+  const repo    = process.env.GITHUB_REPO;
+  const branch  = process.env.GITHUB_BRANCH || "main";
   const creator = process.env.KT_CREATOR || "";
 
   if (!token || !repo) {
@@ -458,16 +479,16 @@ async function commitToGitHub(filePath, content) {
     return null;
   }
 
-  const fileName = path.basename(filePath);
-  const newRepoPath = `KT-Agent/output/${fileName}`;
-  const newEncoded = Buffer.from(content).toString("base64");
+  const fileName     = path.basename(filePath);
+  const newRepoPath  = `KT-Agent/output/${fileName}`;
+  const newEncoded   = Buffer.from(content).toString("base64");
 
   // ── Step 1: Get current branch SHA ─────────────────────────────────────────
   const branchRes = await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${branch}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
   });
   if (!branchRes.ok) throw new Error(`Could not get branch ref: ${branchRes.status}`);
-  const branchData = await branchRes.json();
+  const branchData   = await branchRes.json();
   const latestCommitSha = branchData.object.sha;
 
   // ── Step 2: Get current tree SHA ────────────────────────────────────────────
@@ -550,6 +571,18 @@ async function commitToGitHub(filePath, content) {
   const fileUrl = `https://github.com/${repo}/blob/${branch}/${newRepoPath}`;
   console.log(`✅ Committed to GitHub (single commit): ${fileUrl}`);
   console.log(`⏳ GitHub Actions will now trigger reviewer notification...`);
+
+  // ── Step 9: Sync local git to avoid push conflicts on next run ───────────────
+  try {
+    const { execSync } = require("child_process");
+    execSync("git fetch origin", { cwd: PROJECT_ROOT, stdio: "pipe" });
+    execSync(`git reset --hard origin/${branch}`, { cwd: PROJECT_ROOT, stdio: "pipe" });
+    console.log(`🔄 Local git synced with remote — no pull needed next time`);
+  } catch (e) {
+    console.warn(`⚠️  Could not sync local git: ${e.message}`);
+    console.warn(`   Run manually: git fetch origin && git reset --hard origin/${branch}`);
+  }
+
   return fileUrl;
 }
 

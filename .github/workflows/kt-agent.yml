@@ -46,12 +46,15 @@ jobs:
             const docName   = "${{ steps.kt-doc.outputs.doc_name }}";
             const docUrl    = "${{ steps.kt-doc.outputs.doc_url }}";
             const commitUrl = "${{ steps.kt-doc.outputs.commit_url }}";
-            const reviewer  = "${{ vars.KT_REVIEWER }}";
+            // Support comma-separated reviewers: "user1,user2,user3"
+            const reviewerRaw = "${{ vars.KT_REVIEWER }}";
+            const reviewers   = reviewerRaw ? reviewerRaw.split(",").map(r => r.trim()).filter(Boolean) : [];
+            const mentions    = reviewers.map(r => `@${r}`).join(", ");
 
             const body = [
               "## 📘 KT Document Ready for Review",
               "",
-              reviewer ? `@${reviewer} — a new Knowledge Transfer document has been generated and committed.` : "A new Knowledge Transfer document has been generated and committed.",
+              reviewers.length > 0 ? `${mentions} — a new Knowledge Transfer document has been generated and committed.` : "A new Knowledge Transfer document has been generated and committed.",
               "",
               `**Document:** [${docName}](${docUrl})`,
               `**Commit:** ${commitUrl}`,
@@ -78,9 +81,10 @@ jobs:
               labels: ["kt-review", "documentation"],
             };
 
-            if (reviewer) issuePayload.assignees = [reviewer];
+            if (reviewers.length > 0) issuePayload.assignees = reviewers;
 
             const issue = await github.rest.issues.create(issuePayload);
             console.log(`📬 Review issue created: ${issue.data.html_url}`);
-            core.summary.addRaw(`### 📬 Reviewer Notified\n[View Issue](${issue.data.html_url})`);
+            const notified = reviewers.length > 0 ? reviewers.map(r => `@${r}`).join(", ") : "no reviewer configured";
+            core.summary.addRaw(`### 📬 Reviewers Notified: ${notified}\n[View Issue](${issue.data.html_url})`);
             await core.summary.write();
